@@ -1,0 +1,41 @@
+name: FSS 최신 항목 검증
+
+on:
+  schedule:
+    # KST 오전 8시 = UTC 23:00 (전날) — 알림 발송 후 1시간 뒤 검증
+    - cron: "0 23 * * *"
+  workflow_dispatch:
+    inputs:
+      days_back:
+        description: '검증 기간 (일)'
+        required: false
+        default: '7'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+
+      - name: 최신 항목 검증
+        run: |
+          DAYS="${{ github.event.inputs.days_back }}"
+          python validator.py "${DAYS:-7}"
+        # exit code 2 = 누락 항목 존재 (경고로 처리, 빌드 실패 아님)
+        continue-on-error: true
+
+      - name: 검증 결과 요약
+        run: echo "검증 완료. 위 로그에서 누락 항목 여부를 확인하세요."

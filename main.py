@@ -14,11 +14,13 @@
 import json
 import os
 import sys
+from datetime import date
 from pathlib import Path
 
 from scraper import fetch_new_items
 from emailer import send_email
 from summarizer import summarize_item
+from db import save_items, export_excel_bytes
 
 SEEN_FILE = Path("seen_items.json")
 
@@ -52,7 +54,17 @@ def main() -> None:
         for item in new_items:
             print(f"  AI 요약 중: {item['title'][:40]}…")
             item["summary"] = summarize_item(item)
-        send_email(new_items)
+
+        # DB 저장
+        save_items(new_items)
+        print("DB 저장 완료")
+
+        # 당일 발송 항목을 엑셀로 생성해 이메일 첨부
+        today = date.today().isoformat()
+        excel_bytes = export_excel_bytes(today, today)
+
+        send_email(new_items, excel_bytes=excel_bytes)
+
         # 발송 완료 항목을 이력에 추가
         for item in new_items:
             seen.add(item["id"])

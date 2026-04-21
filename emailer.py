@@ -1,8 +1,10 @@
 import smtplib
 import os
 import re
+from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email import encoders
 from datetime import date
 
 PRIORITY_LAWS = {
@@ -84,15 +86,22 @@ def _build_html(items: list[dict]) -> str:
             summary_html = ""
             if item.get("summary"):
                 summary_html = (
-                    f'<div style="margin-top:5px;font-size:12px;color:#374151;'
+                    f'<div style="margin-top:6px;font-size:12px;color:#374151;'
                     f'background:#f8fafc;border-left:3px solid #93c5fd;'
                     f'padding:5px 10px;border-radius:0 4px 4px 0;line-height:1.6;">'
+                    f'<span style="font-weight:600;color:#1e3a5f;font-size:11px;">[AI요약]</span> '
                     f'{item["summary"]}</div>'
                 )
+            url_html = (
+                f'<div style="margin-top:4px;font-size:11px;color:#9ca3af;">'
+                f'&#128279; 원문: <a href="{item["url"]}" style="color:#6b7280;word-break:break-all;">{item["url"]}</a>'
+                f'</div>'
+            )
             rows_html += f"""
             <tr>
               <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;">
-                <a href="{item['url']}" style="color:#1d4ed8;text-decoration:none;">{_highlight_laws(item['title'])}</a>
+                <a href="{item['url']}" style="color:#1d4ed8;text-decoration:none;font-weight:500;">{_highlight_laws(item['title'])}</a>
+                {url_html}
                 {summary_html}
               </td>
               <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;white-space:nowrap;color:#6b7280;vertical-align:top;">
@@ -137,18 +146,26 @@ def _build_text(items: list[dict]) -> str:
     today = date.today().strftime("%Y-%m-%d")
     lines = [f"금융감독원 신규 알림 ({today})\n" + "=" * 50]
     for item in items:
-        lines.append(f"[{item['category']}] {item['title']} ({item['date']})\n  {item['url']}")
+        block = (
+            f"[{item['category']}] {item['title']} ({item['date']})\n"
+            f"  원문 URL: {item['url']}"
+        )
+        if item.get("summary"):
+            block += f"\n  [AI요약] {item['summary']}"
+        lines.append(block)
     return "\n\n".join(lines)
 
 
-def send_email(items: list[dict]) -> None:
+def send_email(items: list[dict], excel_bytes: bytes | None = None) -> None:
     """
     환경변수에서 설정을 읽어 이메일 발송.
 
     필수 환경변수:
-      FSS_EMAIL_SENDER    — 발신 Gmail 주소
-      FSS_EMAIL_PASSWORD  — Gmail 앱 비밀번호 (16자리)
+      FSS_EMAIL_SENDER     — 발신 Gmail 주소
+      FSS_EMAIL_PASSWORD   — Gmail 앱 비밀번호 (16자리)
       FSS_EMAIL_RECIPIENTS — 수신자 이메일 (쉼표 구분, 여러 명 가능)
+
+    excel_bytes: 첨부할 엑셀 파일 바이트 (None이면 첨부 생략)
     """
     sender = os.environ["FSS_EMAIL_SENDER"]
     password = os.environ["FSS_EMAIL_PASSWORD"]
@@ -162,16 +179,29 @@ def send_email(items: list[dict]) -> None:
     today = date.today().strftime("%Y.%m.%d")
     subject = f"[FSS 알림] 비조치의견서·법령해석 신규 {len(items)}건 ({today})"
 
-    msg = MIMEMultipart("alternative")
+    msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
     msg["From"] = sender
     msg["To"] = ", ".join(recipients)
 
-    msg.attach(MIMEText(_build_text(items), "plain", "utf-8"))
-    msg.attach(MIMEText(_build_html(items), "html", "utf-8"))
+    # 텍스트·HTML 파트
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(_build_text(items), "plain", "utf-8"))
+    alt.attach(MIMEText(_build_html(items), "html", "utf-8"))
+    msg.attach(alt)
+
+    # 엑셀 첨부
+    if excel_bytes:
+        filename = f"fss_items_{date.today().strftime('%Y%m%d')}.xlsx"
+        part = MIMEBase("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        part.set_payload(excel_bytes)
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename=filename)
+        msg.attach(part)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(sender, password)
         server.sendmail(sender, recipients, msg.as_string())
 
-    print(f"이메일 발송 완료 → {recipients} ({len(items)}건)")
+    attach_info = f" (엑셀 첨부 {len(excel_bytes):,}bytes)" if excel_bytes else ""
+    print(f"이메일 발송 완료 → {recipients} ({len(items)}건){attach_info}")

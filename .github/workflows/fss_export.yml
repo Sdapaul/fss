@@ -1,0 +1,42 @@
+name: FSS 이력 엑셀 추출
+
+on:
+  workflow_dispatch:
+    inputs:
+      date_from:
+        description: '시작일 (YYYY-MM-DD)'
+        required: true
+        default: '2025-01-01'
+      date_to:
+        description: '종료일 (YYYY-MM-DD)'
+        required: true
+        default: '2025-12-31'
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+
+      - name: 엑셀 파일 생성
+        run: python export_excel.py "${{ github.event.inputs.date_from }}" "${{ github.event.inputs.date_to }}"
+
+      - name: 엑셀 Artifact 업로드
+        uses: actions/upload-artifact@v4
+        with:
+          name: fss_items_${{ github.event.inputs.date_from }}_${{ github.event.inputs.date_to }}
+          path: fss_export.xlsx
+          retention-days: 30
